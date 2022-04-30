@@ -18,12 +18,16 @@ def train(model, device, train_loader, optimizer, criterion, epoch):
     model.train()
     losses = []
     epoch_fracs = []
+    correct = 0.
     for batch_idx, (data, target) in tqdm(enumerate(train_loader)):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, target)
         loss.backward()
+        pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+        correct += pred.eq(target.view_as(pred)).sum().item()
+
         optimizer.step()
         if batch_idx % 10 == 0:
             losses.append(loss.item())
@@ -32,7 +36,7 @@ def train(model, device, train_loader, optimizer, criterion, epoch):
 #             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
 #                 epoch, batch_idx * len(data), len(train_loader.dataset),
 #                 100. * batch_idx / len(train_loader), loss.item()))
-    return epoch_fracs, losses
+    return epoch_fracs, losses, 100. * correct / len(train_loader.dataset)
 
 
 # test loop
@@ -44,7 +48,7 @@ def test(model, device, test_loader, criterion):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += torch.sum(criterion(output, target)).item()  # sum up batch loss
+            test_loss += criterion(output, target).item() * target.shape[0]  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
@@ -64,12 +68,14 @@ def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model
 
     val_best = 0.
     val_accs = []
+    train_accs = []
     val_losses = []
     train_losses = []
     train_iters = []
     val_epochs = []
     for epoch in tqdm(range(1, epochs + 1)):
-        epoch_fracs, train_loss = train(model, device, train_loader, optimizer, criterion, epoch)
+        epoch_fracs, train_loss, train_acc = train(model, device, train_loader, optimizer, criterion, epoch)
+        train_accs.append(train_acc)
         val_loss, val_acc = test(model, device, test_loader, criterion)
         scheduler.step()
 
@@ -90,11 +96,13 @@ def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model
 
         ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
         color = 'tab:green'
-        lns2 = ax2.plot(val_epochs, val_accs, "o", label="validation accuracy", color=color)
+        lns2_0 = ax2.plot(val_epochs, val_accs, "o", label="validation accuracy", color=color)
+        lns2_1 = ax2.plot(val_epochs, train_accs, "o", label="train accuracy", color="orange")
+
         ax2.set_ylabel('accuracy',)  # we already handled the x-label with ax1
         ax2.tick_params(axis='y', labelcolor=color)
         fig.tight_layout()  # otherwise the right y-label is slightly clipped
-        leg = lns1_0 + lns1_1 + lns2
+        leg = lns1_0 + lns1_1 + lns2_0 + lns2_1
         labs = [l.get_label() for l in leg]
         ax1.legend(leg, labs, loc=0)
         plt.show()
