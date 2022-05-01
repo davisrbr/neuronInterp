@@ -46,7 +46,9 @@ class BasicBlockFixed(nn.Module):
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         # self.conv1 = conv3x3(inplanes, planes, stride)
-        self.conv1_two_stream = ConvTwoStreamNorm(inplanes, planes, stride, mode=mode)
+        self.conv1_two_stream = ConvTwoStreamNorm(
+            inplanes, planes, kernel_size=3, stride=stride, mode=mode
+        )
 
         self.bn1 = norm_layer(planes)
         self.relu = nn.ReLU(inplace=True)
@@ -55,16 +57,18 @@ class BasicBlockFixed(nn.Module):
         self.downsample = downsample
         self.stride = stride
         self.conv2_two_stream = ConvTwoStreamResidual(
-            planes, planes, kernel_size=3, mode=mode
+            planes, planes, kernel_size=3, mode=mode, stride=1
         )
 
-    def forward(self, x, x_init):
+    # def forward(self, x, x_init):
+    def forward(self, xs):
+        x, x_init = xs
         identity = x
 
         # out = self.conv1(x)
         # out = self.bn1(out)
         # out = self.relu(out)
-        out = self.conv1_two_stream(x, self.bn1, x_init)
+        out, x_init = self.conv1_two_stream(x, self.bn1, x_init)
 
         # out = self.conv2(out)
         # out = self.bn2(out)
@@ -74,9 +78,11 @@ class BasicBlockFixed(nn.Module):
 
         # out += identity
         # out = self.relu(out)
-        out = self.conv2_two_stream(out, self.bn2, identity, self.downsample, x_init)
+        out, x_init = self.conv2_two_stream(
+            out, self.bn2, identity, downsample=self.downsample, x_init=x_init
+        )
 
-        return out
+        return out, x_init
 
 
 class BasicBlockSigmoidGating(nn.Module):
@@ -102,7 +108,9 @@ class BasicBlockSigmoidGating(nn.Module):
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         # self.conv1 = conv3x3(inplanes, planes, stride)
-        self.conv1_two_stream = ConvTwoStreamNorm(inplanes, planes, stride)
+        self.conv1_two_stream = ConvTwoStreamNorm(
+            inplanes, planes, kernel_size=1, stride=stride
+        )
 
         self.bn1 = norm_layer(planes)
         self.relu = nn.ReLU(inplace=True)
@@ -133,65 +141,7 @@ class BasicBlockSigmoidGating(nn.Module):
         return out
 
 
-class Bottleneck(nn.Module):
-    # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
-    # while original implementation places the stride at the first 1x1 convolution(self.conv1)
-    # according to "Deep residual learning for image recognition"https://arxiv.org/abs/1512.03385.
-    # This variant is also known as ResNet V1.5 and improves accuracy according to
-    # https://ngc.nvidia.com/catalog/model-scripts/nvidia:resnet_50_v1_5_for_pytorch.
-
-    expansion = 4
-
-    def __init__(
-        self,
-        inplanes,
-        planes,
-        stride=1,
-        downsample=None,
-        groups=1,
-        base_width=64,
-        dilation=1,
-        norm_layer=None,
-    ):
-        super(Bottleneck, self).__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        width = int(planes * (base_width / 64.0)) * groups
-        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv1x1(inplanes, width)
-        self.bn1 = norm_layer(width)
-        self.conv2 = conv3x3(width, width, stride, groups, dilation)
-        self.bn2 = norm_layer(width)
-        self.conv3 = conv1x1(width, planes * self.expansion)
-        self.bn3 = norm_layer(planes * self.expansion)
-        self.relu = nn.ReLU(inplace=True)
-        self.downsample = downsample
-        self.stride = stride
-
-    def forward(self, x):
-        identity = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.relu(out)
-
-        out = self.conv3(out)
-        out = self.bn3(out)
-
-        if self.downsample is not None:
-            identity = self.downsample(x)
-
-        out += identity
-        out = self.relu(out)
-
-        return out
-
-
-class ResNet(nn.Module):
+class ResNetFixed(nn.Module):
     def __init__(
         self,
         block,
@@ -204,10 +154,9 @@ class ResNet(nn.Module):
         norm_layer=None,
         mode=0,
     ):
-        super(ResNet, self).__init__()
-        # infer type of experiment
-        if isinstance(block, BasicBlockFixed):
-            print(block)
+        super(ResNetFixed, self).__init__()
+
+        self.mode = mode
 
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -226,21 +175,37 @@ class ResNet(nn.Module):
             )
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(
-            3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False
+        self.conv1_two_stream = ConvTwoStreamNorm(
+            3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False, mode=mode
         )
+        # self.conv1 = nn.Conv2d(
+        #     3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False
+        # )
         self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
+        # self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(
-            block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0]
+            block,
+            128,
+            layers[1],
+            stride=2,
+            dilate=replace_stride_with_dilation[0],
         )
         self.layer3 = self._make_layer(
-            block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1]
+            block,
+            256,
+            layers[2],
+            stride=2,
+            dilate=replace_stride_with_dilation[1],
         )
         self.layer4 = self._make_layer(
-            block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2]
+            block,
+            512,
+            layers[3],
+            stride=2,
+            dilate=replace_stride_with_dilation[2],
         )
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
@@ -257,12 +222,10 @@ class ResNet(nn.Module):
         # This improves the model by 0.2~0.3% according to https://arxiv.org/abs/1706.02677
         if zero_init_residual:
             for m in self.modules():
-                nn.init.constant_(m.bn2.weight, 0)
-                # if isinstance(m, Bottleneck):
-                #     nn.init.constant_(m.bn3.weight, 0)
-                # elif isinstance(m, BasicBlock):
+                if isinstance(m, BottleneckFixed):
+                    nn.init.constant_(m.bn2.weight, 0)
 
-    def _make_layer(self, block, planes, blocks, stride=1, dilate=False, mode=0):
+    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         norm_layer = self._norm_layer
         downsample = None
         previous_dilation = self.dilation
@@ -286,7 +249,7 @@ class ResNet(nn.Module):
                 self.base_width,
                 previous_dilation,
                 norm_layer,
-                mode,
+                self.mode,
             )
         )
         self.inplanes = planes * block.expansion
@@ -299,7 +262,7 @@ class ResNet(nn.Module):
                     base_width=self.base_width,
                     dilation=self.dilation,
                     norm_layer=norm_layer,
-                    mode=mode,
+                    mode=self.mode,
                 )
             )
 
@@ -307,15 +270,17 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x):
         # See note [TorchScript super()]
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
+        x, x_init = self.conv1_two_stream(x, self.bn1)
+        # x = self.conv1(x)
+        # x = self.bn1(x)
+        # x = self.relu(x)
         x = self.maxpool(x)
+        x_init = self.maxpool(x_init)
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        x, x_init = self.layer1((x, x_init))
+        x, x_init = self.layer2((x, x_init))
+        x, x_init = self.layer3((x, x_init))
+        x, x_init = self.layer4((x, x_init))
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
@@ -328,7 +293,8 @@ class ResNet(nn.Module):
 
 
 def _resnet(arch, block, layers, mode, **kwargs):
-    model = ResNet(block, layers, mode=mode, **kwargs)
+    # model = ResNet(block, layers, mode=mode, **kwargs)
+    model = ResNetFixed(block, layers, mode=mode, **kwargs)
     return model
 
 
@@ -339,9 +305,7 @@ def resnet18_fixed(mode=0, **kwargs):
     Args:
         mode (int): experiment mode
     """
-    return _resnet(
-        "resnet18", BasicBlockFixed, [2, 2, 2, 2], mode, **kwargs
-    )
+    return _resnet("resnet18", BasicBlockFixed, [2, 2, 2, 2], mode, **kwargs)
 
 
 def resnet34_fixed(mode=0, **kwargs):
@@ -351,13 +315,13 @@ def resnet34_fixed(mode=0, **kwargs):
     Args:
         mode (int): experiment mode
     """
-    return _resnet(
-        "resnet34", BasicBlockFixed, [3, 4, 6, 3], mode, **kwargs
-    )
+    return _resnet("resnet34", BasicBlockFixed, [3, 4, 6, 3], mode, **kwargs)
+
 
 if __name__ == "__main__":
     # test defining a model and passing in a tensor
-    model = resnet18_fixed()
-    test_tens = torch.randn(1, 3, 224, 224)
+    model = resnet18_fixed().to("cuda")
+    print(model)
+    # print(model.layer1)
+    test_tens = torch.randn(1, 3, 224, 224, device="cuda")
     model(test_tens)
-
