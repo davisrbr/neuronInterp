@@ -638,3 +638,125 @@ def sCNN_k(c=64, num_classes=10):
         Flatten(),
         nn.Linear(c * 4, num_classes, bias=True),
     )
+
+
+class ConvTwoStreamLearned(nn.Module):
+    """Modifies an nn.Module from W to MW,
+    where W is the original op and M is an orthonormal matrix.
+    Projection implemented via a 1x1 convolution."""
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        bias=False,
+        padding=1,
+        gate_width_ratio=10,
+        mode=0,
+    ):
+        super(ConvTwoStreamLearned, self).__init__()
+        self.gate_width_ratio = gate_width_ratio
+
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        self.conv_init = nn.Conv2d(
+            in_channels,
+            out_channels // self.gate_width_ratio,
+            stride=stride,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        self.conv1x1 = nn.Conv2d(
+            out_channels // self.gate_width_ratio,
+            out_planes,
+            kernel_size=1,
+            stride=1,
+            bias=False,
+        )
+
+        self.mode = mode
+
+    def forward(self, x, norm_layer1, norm_layer2, x_init=None):
+        if x_init is None:
+            x_init = x.clone()
+
+        x_init = norm_layer2(self.conv_init(x_init))
+
+        x = norm_layer1(self.conv(x)) * torch.sigmoid(self.conv1x1(x_init))
+        x_init = F.relu(x_init)
+
+        return x, x_init
+
+
+class ConvTwoStreamResidualLearned(nn.Module):
+    """Modifies an nn.Module from W to MW,
+    where W is the original op and M is an orthonormal matrix.
+    Projection implemented via a 1x1 convolution."""
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        bias=False,
+        padding=1,
+        gate_width_ratio=10,
+        mode=0,
+    ):
+        super(ConvTwoStreamResidualLearned, self).__init__()
+        self.gate_width_ratio = gate_width_ratio
+
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        self.conv_init = nn.Conv2d(
+            in_channels,
+            out_channels // self.gate_width_ratio,
+            stride=stride,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        self.conv1x1 = nn.Conv2d(
+            out_channels // self.gate_width_ratio,
+            out_planes,
+            kernel_size=1,
+            stride=1,
+            bias=False,
+        )
+
+    def forward(self, x, norm_layer1, norm_layer2, identity, downsample, x_init=None):
+        if downsample is not None:
+            identity = downsample(identity)
+
+        if x_init is None:
+            x_init = x.clone()
+
+        x = norm_layer1(self.conv(x))
+        x_init = norm_layer2(self.conv_init(x_init))
+
+        x += identity
+        x = x * torch.sigmoid(self.conv1x1(x_init))
+        x_init = F.relu(x_init)
+
+        return x, x_init
+

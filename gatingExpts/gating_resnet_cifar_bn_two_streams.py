@@ -11,45 +11,9 @@ from cifar_model_oldbn import (
     ConvTwoStreamNormFixBN,
     ConvSigmoidNorm,
     ConvSigmoidNormResidual,
+    ConvTwoStreamLearned,
+    ConvTwoStreamResidualLearned,
 )
-
-
-def bn_model_handler(model: nn.Module, bn_only: bool) -> nn.Module:
-    if not bn_only:
-        for module in model.modules():
-            # print(module)
-            if isinstance(module, torch.nn.BatchNorm2d):
-                if hasattr(module, 'weight'):
-                    module.weight.requires_grad_(True)
-                if hasattr(module, 'bias'):
-                    module.bias.requires_grad_(True)
-            else:
-                if hasattr(module, 'weight'):
-                    module.weight.requires_grad_(False)
-                if hasattr(module, 'bias'):
-                    try:
-                        module.bias.requires_grad_(False)
-                    except:
-                        pass
-    else:
-        for module in model.modules():
-            if isinstance(module, torch.nn.BatchNorm2d):
-                if hasattr(module, 'weight'):
-                    module.weight.requires_grad_(False)
-                if hasattr(module, 'bias'):
-                    module.bias.requires_grad_(False)
-            else:
-                if hasattr(module, 'weight'):
-                    module.weight.requires_grad_(True)
-                if hasattr(module, 'bias'):
-                    try:
-                        module.bias.requires_grad_(True)
-                    except:
-                        pass
-
-    return model
-
-
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -71,6 +35,7 @@ class BasicBlockFixedBN(nn.Module):
         dilation=1,
         norm_layer=None,
         mode=0,
+        gate_width_ratio=10,
     ):
         super(BasicBlockFixedBN, self).__init__()
         if norm_layer is None:
@@ -80,9 +45,21 @@ class BasicBlockFixedBN(nn.Module):
         if dilation > 1:
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
-        self.conv1_two_stream = ConvTwoStreamNormFixBN(
-            inplanes, planes, kernel_size=3, stride=stride, mode=mode
-        )
+        if mode == 4:
+            self.conv1_two_stream = ConvTwoStreamLearned(
+                inplanes, planes, kernel_size=3, stride=stride, mode=mode, gate_width_ratio=gate_width_ratio
+            )
+            self.conv2_two_stream = ConvTwoStreamResidualLearned(
+                planes, planes, kernel_size=3, mode=mode, stride=1, gate_width_ratio=gate_width_ratio
+            )
+
+        else:
+            self.conv1_two_stream = ConvTwoStreamNormFixBN(
+                inplanes, planes, kernel_size=3, stride=stride, mode=mode
+            )
+            self.conv2_two_stream = ConvTwoStreamResidualFixBN(
+                planes, planes, kernel_size=3, mode=mode, stride=1
+            )
 
         self.bn1_conv = norm_layer(planes)
         self.bn1_init = norm_layer(planes, affine=False)
@@ -91,26 +68,11 @@ class BasicBlockFixedBN(nn.Module):
         self.bn2_init = norm_layer(planes, affine=False)
         self.downsample = downsample
         self.stride = stride
-        self.conv2_two_stream = ConvTwoStreamResidualFixBN(
-            planes, planes, kernel_size=3, mode=mode, stride=1
-        )
 
-    # def forward(self, x, x_init):
     def forward(self, xs):
         x, x_init = xs
         identity = x
-
-        # out = self.conv1(x)
-        # out = self.bn1(out)
         out, x_init = self.conv1_two_stream(x, self.bn1_conv, self.bn1_init, x_init)
-
-        # out = self.conv2(out)
-        # out = self.bn2(out)
-
-        # if self.downsample is not None:
-        #     identity = self.downsample(x)
-
-        # out += identity
         out, x_init = self.conv2_two_stream(
             out, self.bn2_conv, self.bn2_init, identity, downsample=self.downsample, x_init=x_init
         )
@@ -151,6 +113,7 @@ class BasicBlockSigmoidGating(nn.Module):
 
         self.bn2_conv = norm_layer(planes)
         # self.bn2_init = norm_layer(planes, affine=False)
+
         self.downsample = downsample
         self.stride = stride
         self.conv2_two_stream = ConvSigmoidNormResidual(
@@ -531,4 +494,9 @@ if __name__ == "__main__":
     model = resnet20_fixed(mode=3).to("cuda")
     model(test_tens)
     model = resnet32_fixed(mode=3).to("cuda")
+    model(test_tens)
+
+    model = resnet20_fixed(mode=4).to("cuda")
+    model(test_tens)
+    model = resnet32_fixed(mode=4).to("cuda")
     model(test_tens)
