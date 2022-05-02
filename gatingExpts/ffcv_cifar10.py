@@ -29,11 +29,14 @@ from torch.optim import SGD, lr_scheduler
 from tqdm import tqdm
 
 from torchvision import datasets, transforms, models
-from gating_resnet import resnet18_sigmoid, resnet18_fixed
-from gating_resnet_cifar import resnet20_sigmoid, resnet20_fixed, bn_model_handler
+from gating_resnet_cifar_bn_two_streams import resnet20_sigmoid, resnet20_fixed, bn_model_handler
+# from gating_resnet_bn_two_streams import resnet20_sigmoid, resnet20_fixed, bn_model_handler
 import wandb
 
 import argparse
+from datetime import datetime
+from uuid import uuid4
+
 # import os
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
@@ -41,6 +44,13 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
     parser.add_argument('--mode', '-mode', default=0, type=int)
+    parser.add_argument('--epochs', default=150, type=int)
+    parser.add_argument('--lr', default=1.5, type=float, help='learning rate')
+    parser.add_argument('--momentum', default=0.9, type=float, help='momentum')
+    parser.add_argument('--weight_decay', default=5e-4, type=float, help='weight decay')
+    parser.add_argument('--label_smoothing', default=0.0, type=float, help='label smoothing')
+    parser.add_argument('--sigmoid', action='store_true')
+    parser.add_argument('--batch_size', '-b_sz', default=512, type=int)
     args = parser.parse_args()
 
     datasets = {
@@ -59,8 +69,7 @@ if __name__ == "__main__":
     CIFAR_MEAN = [125.307, 122.961, 113.8575]
     CIFAR_STD = [51.5865, 50.847, 51.255]
 
-    # BATCH_SIZE = 512
-    BATCH_SIZE = 1024
+    BATCH_SIZE = args.batch_size
 
     loaders = {}
     for name in ["train", "test"]:
@@ -103,47 +112,41 @@ if __name__ == "__main__":
             pipelines={"image": image_pipeline, "label": label_pipeline},
         )
 
-        # model = mCNN_bn_k(c=128, num_classes=100).to(memory_format=ch.channels_last).cuda() # model.to(memory_format=ch.channels_last).cuda()
-        # model = models.resnet18(pretrained=False)
+        # model = mCNN_bn_k(c=128, num_classes=10).to(memory_format=ch.channels_last).cuda() # model.to(memory_format=ch.channels_last).cuda()
+        # model = models.resnet20(pretrained=False)
         # model.fc = ch.nn.Linear(512, 10)
-        # model = resnet18_sigmoid(num_classes=10, mode=args.mode)
-        model = resnet20_fixed(num_classes=10, mode=args.mode)
+        if args.sigmoid:
+            model = resnet20_sigmoid(num_classes=10, mode=args.mode)
+        else:
+            model = resnet20_fixed(num_classes=10, mode=args.mode)
         model = model.to(memory_format=ch.channels_last).cuda()
-        # EPOCHS = 2048
-        # EPOCHS = 1024
-        EPOCHS = 500
-        lr = 1.5
-        momentum = 0.9
-        weight_decay = 1e-4
+
+        EPOCHS = args.epochs
+        lr = args.lr
+        momentum = args.momentum
+        weight_decay= args.weight_decay
+        label_smoothing= args.label_smoothing
 
         opt = SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=200)
         iters_per_epoch = 50000 // BATCH_SIZE
         lr_schedule = np.interp(
             np.arange((EPOCHS + 1) * iters_per_epoch),
             [0, 5 * iters_per_epoch, EPOCHS * iters_per_epoch],
             [0, 1, 0],
         )
+        # scheduler = lr_scheduler.CosineAnnealingLR(opt, T_max=200)
         scheduler = lr_scheduler.LambdaLR(opt, lr_schedule.__getitem__)
         scaler = GradScaler()
-        # loss_fn = CrossEntropyLoss(label_smoothing=0.1)
-        loss_fn = CrossEntropyLoss()
+        loss_fn = CrossEntropyLoss(label_smoothing=label_smoothing)
 
     wandb.init(
         project="neuronInterp",
-        entity="davisbrownr",
-        config={
-            "epochs": EPOCHS,
-            "batch_size": BATCH_SIZE,
-            "lr": lr,
-            "momentum": momentum,
-            "weight_decay": weight_decay,
-        },
+        entity="single-neuron",
     )
-    wandb.run.name = f"resnet20_cifar10_fixed_m{args.mode}_ffcv1"
+    eventid = datetime.now().strftime('%Y%m_%d%H_%M%S_')
+    wandb.run.name = f"resnet20_cifar10_{'sigmoid' if args.sigmoid else 'fixed'}_m{args.mode}_ffcv_{eventid}"
     wandb.config.update(args)
-    wandb.watch(model)
-
+    wandb.watch(model, log='all')
     for ep in range(EPOCHS):
         model.train()
         train_loss = 0
@@ -155,18 +158,16 @@ if __name__ == "__main__":
                 out = model(ims)
                 loss = loss_fn(out, labs)
 
-                # print(loss.item())
-                # print(labs.size(0))
-                # print(labs.shape)
                 train_loss += loss.item() * labs.size(0)
                 _, predicted = out.max(1)
                 total += labs.size(0)
                 correct += predicted.eq(labs).sum().item()
-
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
-            scheduler.step()
+            # handles batchnorming
+            if ep > 0:
+                scaler.scale(loss).backward()
+                scaler.step(opt)
+                scaler.update()
+                scheduler.step()
 
             wandb.log(
                 {

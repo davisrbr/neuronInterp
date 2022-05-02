@@ -251,8 +251,6 @@ class ResNetFixed(nn.Module):
     def _forward_impl(self, x):
         # See note [TorchScript super()]
         x, x_init = self.conv1_two_stream(x, self.bn1)
-        # x = self.conv1(x)
-        # x = self.bn1(x)
         x = self.maxpool(x)
         x_init = self.maxpool(x_init)
 

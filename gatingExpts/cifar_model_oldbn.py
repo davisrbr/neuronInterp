@@ -113,6 +113,7 @@ class ConvSigmoidNorm(nn.Module):
         self.conv_gating.weight.data = self.conv_weight.weight.data.clone()
 
         self.w_init = self.conv_weight.weight.data.clone()
+        self.mode = mode
 
         if mode == 1:
             for param in self.conv_weight.parameters():
@@ -121,8 +122,11 @@ class ConvSigmoidNorm(nn.Module):
             for param in self.conv_gating.parameters():
                 param.requires_grad = False
 
-    def forward(self, x, norm_layer_conv, norm_layer_init, x_init=None):
-        x = torch.sigmoid(norm_layer_init(self.conv_gating(x))) * norm_layer_conv(self.conv_weight(x))
+    def forward(self, x, norm_layer, x_init=None):
+        if self.mode != 3:
+            x = torch.sigmoid(self.conv_gating(x)) * norm_layer(self.conv_weight(x))
+        else:
+            x = torch.sigmoid(self.conv_gating(x)).detach() * norm_layer(self.conv_weight(x))
         return x
 
 
@@ -171,12 +175,17 @@ class ConvSigmoidNormResidual(nn.Module):
             for param in self.conv_gating.parameters():
                 param.requires_grad = False
 
-    def forward(self, x, norm_layer_conv, norm_layer_init, identity, downsample, x_init=None):
+        self.mode = mode
+
+    def forward(self, x, norm_layer, identity, downsample, x_init=None):
         if downsample is not None:
             identity = downsample(identity)
-        x = norm_layer_conv(self.conv_weight(x))
+        x = norm_layer(self.conv_weight(x))
         x += identity
-        x = torch.sigmoid(norm_layer_init(self.conv_gating(x))) * x
+        if self.mode != 3:
+            x = torch.sigmoid(self.conv_gating(x)) * x
+        else:
+            x = torch.sigmoid(self.conv_gating(x)).detach() * x
         return x
 
 
@@ -341,17 +350,17 @@ class ConvTwoStreamNormFixBN(nn.Module):
 
         self.mode = mode
 
-    def forward(self, x, norm_layer_conv, norm_layer_init, x_init=None):
+    def forward(self, x, norm_layer1, norm_layer2, x_init=None):
         if x_init is None:
             x_init = x.clone()
 
         if self.mode == 0:
-            x_init = F.relu(norm_layer_init(self.conv_init(x_init)))
-            x = F.relu(norm_layer_conv(self.conv(x)))
+            x_init = F.relu(norm_layer2(self.conv_init(x_init)))
+            x = F.relu(norm_layer1(self.conv(x)))
 
         if self.mode == 1 or self.mode == 2 or self.mode == 3:
-            x_init = norm_layer_init(self.conv_init(x_init))
-            x = norm_layer_conv(self.conv(x)) * (x_init > 0).detach()
+            x_init = norm_layer2(self.conv_init(x_init))
+            x = norm_layer1(self.conv(x)) * (x_init > 0).detach()
             x_init = F.relu(x_init)
 
         return x, x_init
@@ -474,7 +483,7 @@ class ConvTwoStreamResidualFixBN(nn.Module):
 
         self.mode = mode
 
-    def forward(self, x, norm_layer_conv, norm_layer_init, identity, downsample, x_init=None):
+    def forward(self, x, norm_layer1, norm_layer2, identity, downsample, x_init=None):
         if downsample is not None:
             identity = downsample(identity)
 
@@ -488,8 +497,8 @@ class ConvTwoStreamResidualFixBN(nn.Module):
             x = F.relu(x)
 
         if self.mode == 1 or self.mode == 2 or self.mode == 3:
-            x = norm_layer_conv(self.conv(x))
-            x_init = norm_layer_init(self.conv_init(x_init))
+            x = norm_layer1(self.conv(x))
+            x_init = norm_layer2(self.conv_init(x_init))
 
             x += identity
             x = x * (x_init > 0).detach()
