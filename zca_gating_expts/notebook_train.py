@@ -67,11 +67,14 @@ def test(model, device, test_loader, criterion):
     return  test_loss, 100. * correct / len(test_loader.dataset)
 
 
-def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model_name: str, epochs: int = 20, device: torch.device = torch.device("cpu")):
+def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model_name: str, epochs: int = 200, device: torch.device = torch.device("cpu")):
     sns.set_style("darkgrid")
-    lr = 1e-3
-    optimizer = optim.Adam([{'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr':lr}], lr=lr)
-    scheduler = StepLR(optimizer, step_size=3, gamma=0.7)
+#     lr = 1e-3
+#     optimizer = optim.Adam([{'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr':lr}], lr=lr)
+#     scheduler = StepLR(optimizer, step_size=3, gamma=0.7)
+    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2) #learning rate decay
+
     criterion = nn.CrossEntropyLoss()
     #print('b1')
     val_best = 0.
@@ -88,7 +91,7 @@ def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model
         #print('b23')
         
         #print('b4')
-        scheduler.step()
+        scheduler.step(epoch)
         val_losses.append(val_loss)
         val_accs.append(val_acc)
         train_accs.append(train_acc)
@@ -100,8 +103,8 @@ def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model
         ax1.set_xlabel('epochs')
         ax1.set_ylabel('loss')
         ax1.set_yscale('log')
-        lns1_1 = ax1.plot(val_epochs, train_losses, label="train loss", color='green')
-        lns1_0 = ax1.plot(val_epochs, val_losses, label="validation loss", color='black')
+        lns1_1 = ax1.plot(val_epochs, train_losses, label = "train loss", color = 'green')
+        lns1_0 = ax1.plot(val_epochs, val_losses, label = "validation loss", color = 'black')
         ax1.tick_params(axis='y')
 
         ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
@@ -109,7 +112,7 @@ def run_train_test_loop(model: torch.nn.Module, train_loader, test_loader, model
         lns2_0 = ax2.plot(val_epochs, val_accs, label="validation accuracy")
         lns2_1 = ax2.plot(val_epochs, train_accs, label="train accuracy")
         ax2.set_ylabel('accuracy',)  # we already handled the x-label with ax1
-        ax2.tick_params(axis='y')
+        ax2.tick_params(axis = 'y')
         fig.tight_layout()  # otherwise the right y-label is slightly clipped
         leg = lns1_0 + lns1_1 + lns2_0 + lns2_1
         labs = [l.get_label() for l in leg]
