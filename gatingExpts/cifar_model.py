@@ -295,6 +295,69 @@ class ConvTwoStreamNorm(nn.Module):
         return x, x_init
 
 
+class ConvTwoStreamNormFixBN(nn.Module):
+    """Modifies an nn.Module from W to MW,
+    where W is the original op and M is an orthonormal matrix.
+    Projection implemented via a 1x1 convolution."""
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        bias=False,
+        padding=1,
+        mode=0,
+    ):
+        super(ConvTwoStreamNormFixBN, self).__init__()
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        self.conv_init = nn.Conv2d(
+            in_channels,
+            out_channels,
+            stride=stride,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        if mode != 2:
+            self.conv_init.weight.data = self.conv.weight.data.clone()
+
+        for param in self.conv_init.parameters():
+            param.requires_grad = False
+
+        if mode == 3:
+            for param in self.conv.parameters():
+                param.requires_grad = False
+
+        self.mode = mode
+
+    def forward(self, x, norm_layer1, norm_layer2, x_init=None):
+        if x_init is None:
+            x_init = x.clone()
+
+        if self.mode == 0:
+            x_init = F.relu(norm_layer2(self.conv_init(x_init)))
+            x = F.relu(norm_layer1(self.conv(x)))
+
+        if self.mode == 1 or self.mode == 2 or self.mode == 3:
+            x_init = self.conv_init(x_init)
+            x = norm_layer(self.conv(x)) * (x_init > 0).detach()
+            x_init = F.relu(x_init)
+
+        return x, x_init
+
+
+
 class ConvTwoStreamResidual(nn.Module):
     """Modifies an nn.Module from W to MW,
     where W is the original op and M is an orthonormal matrix.
@@ -357,6 +420,76 @@ class ConvTwoStreamResidual(nn.Module):
         if self.mode == 1 or self.mode == 2 or self.mode == 3:
             x_init = self.conv_init(x_init)
             x = norm_layer(self.conv(x))
+
+            x += identity
+            x = x * (x_init > 0).detach()
+            x_init = F.relu(x_init)
+
+        return x, x_init
+
+
+class ConvTwoStreamResidualFixBN(nn.Module):
+    """Modifies an nn.Module from W to MW,
+    where W is the original op and M is an orthonormal matrix.
+    Projection implemented via a 1x1 convolution."""
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        bias=False,
+        padding=1,
+        mode=0,
+    ):
+        super(ConvTwoStreamResidualFixBN, self).__init__()
+        self.conv = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        self.conv_init = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=bias,
+        ).cuda()
+
+        if mode != 2:
+            self.conv_init.weight.data = self.conv.weight.data.clone()
+
+        for param in self.conv_init.parameters():
+            param.requires_grad = False
+
+        if mode == 3:
+            for param in self.conv.parameters():
+                param.requires_grad = False
+
+        self.mode = mode
+
+    def forward(self, x, norm_layer1, norm_layer2, identity, downsample, x_init=None):
+        if downsample is not None:
+            identity = downsample(identity)
+
+        if x_init is None:
+            x_init = x.clone()
+
+        if self.mode == 0:
+            x_init = F.relu(self.conv_init(x_init))
+            x = self.conv(x)
+            x += identity
+            x = F.relu(x)
+
+        if self.mode == 1 or self.mode == 2 or self.mode == 3:
+            x = norm_layer1(self.conv(x))
+            x_init = norm_layer2(self.conv_init(x_init))
 
             x += identity
             x = x * (x_init > 0).detach()
