@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+import sys
+# sys.path.append("/people/brow843/neuronInterp")
+sys.path.append("/people/brow843/neuronInterp/zca_gating_expts")
 from cifar_model import (
     ConvTwoStream,
     ConvTwoStreamResidual,
