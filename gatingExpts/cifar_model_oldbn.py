@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 # Based on https://myrtle.ai/learn/how-to-train-your-resnet-4-architecture/
 # https://github.com/davidcpage/cifar10-fast/blob/master/experiments.ipynb
@@ -655,6 +656,7 @@ class ConvTwoStreamLearned(nn.Module):
         padding=1,
         gate_width_ratio=10,
         mode=0,
+        initial_layer=False,
     ):
         super(ConvTwoStreamLearned, self).__init__()
         self.gate_width_ratio = gate_width_ratio
@@ -669,8 +671,8 @@ class ConvTwoStreamLearned(nn.Module):
         ).cuda()
 
         self.conv_init = nn.Conv2d(
-            in_channels,
-            out_channels // self.gate_width_ratio,
+            3 if initial_layer else math.ceil(in_channels / self.gate_width_ratio),
+            math.ceil(out_channels / self.gate_width_ratio),
             stride=stride,
             kernel_size=kernel_size,
             padding=padding,
@@ -678,8 +680,8 @@ class ConvTwoStreamLearned(nn.Module):
         ).cuda()
 
         self.conv1x1 = nn.Conv2d(
-            out_channels // self.gate_width_ratio,
-            out_planes,
+            math.ceil(out_channels / self.gate_width_ratio),
+            out_channels,
             kernel_size=1,
             stride=1,
             bias=False,
@@ -728,8 +730,9 @@ class ConvTwoStreamResidualLearned(nn.Module):
         ).cuda()
 
         self.conv_init = nn.Conv2d(
-            in_channels,
-            out_channels // self.gate_width_ratio,
+            # in_channels,
+            math.ceil(in_channels / self.gate_width_ratio),
+            math.ceil(out_channels / self.gate_width_ratio),
             stride=stride,
             kernel_size=kernel_size,
             padding=padding,
@@ -737,8 +740,8 @@ class ConvTwoStreamResidualLearned(nn.Module):
         ).cuda()
 
         self.conv1x1 = nn.Conv2d(
-            out_channels // self.gate_width_ratio,
-            out_planes,
+            math.ceil(out_channels / self.gate_width_ratio),
+            out_channels,
             kernel_size=1,
             stride=1,
             bias=False,

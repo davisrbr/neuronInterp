@@ -3,6 +3,7 @@ import torch.nn as nn
 import sys
 # sys.path.append("/people/brow843/neuronInterp")
 sys.path.append("/people/brow843/neuronInterp/gatingExpts")
+import math
 from cifar_model_oldbn import (
     ConvTwoStream,
     ConvTwoStreamResidual,
@@ -14,6 +15,7 @@ from cifar_model_oldbn import (
     ConvTwoStreamLearned,
     ConvTwoStreamResidualLearned,
 )
+from torchinfo import summary
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -52,6 +54,8 @@ class BasicBlockFixedBN(nn.Module):
             self.conv2_two_stream = ConvTwoStreamResidualLearned(
                 planes, planes, kernel_size=3, mode=mode, stride=1, gate_width_ratio=gate_width_ratio
             )
+            self.bn1_init = norm_layer(math.ceil(planes / gate_width_ratio), affine=False)
+            self.bn2_init = norm_layer(math.ceil(planes / gate_width_ratio), affine=False)
 
         else:
             self.conv1_two_stream = ConvTwoStreamNormFixBN(
@@ -60,12 +64,12 @@ class BasicBlockFixedBN(nn.Module):
             self.conv2_two_stream = ConvTwoStreamResidualFixBN(
                 planes, planes, kernel_size=3, mode=mode, stride=1
             )
+            self.bn1_init = norm_layer(planes, affine=False)
+            self.bn2_init = norm_layer(planes, affine=False)
 
         self.bn1_conv = norm_layer(planes)
-        self.bn1_init = norm_layer(planes, affine=False)
 
         self.bn2_conv = norm_layer(planes)
-        self.bn2_init = norm_layer(planes, affine=False)
         self.downsample = downsample
         self.stride = stride
 
@@ -147,10 +151,12 @@ class ResNetFixedBN(nn.Module):
         replace_stride_with_dilation=None,
         norm_layer=None,
         mode=0,
+        gate_width_ratio=10,
     ):
         super(ResNetFixedBN, self).__init__()
 
         self.mode = mode
+        self.gate_width_ratio = gate_width_ratio
 
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -169,12 +175,21 @@ class ResNetFixedBN(nn.Module):
             )
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1_two_stream = ConvTwoStreamNormFixBN(
-            3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False, mode=mode
-        )
-        self.bn1_conv = norm_layer(self.inplanes)
-        self.bn1_init = norm_layer(self.inplanes, affine=False)
+        if mode == 4:
+            self.conv1_two_stream = ConvTwoStreamLearned(
+                3, self.inplanes, kernel_size=3, stride=1,
+                padding=1, bias=False, mode=mode, gate_width_ratio=self.gate_width_ratio,
+                initial_layer=True
+            )
+            self.bn1_init = norm_layer(math.ceil(self.inplanes / self.gate_width_ratio), affine=False)
+        else:
+            self.conv1_two_stream = ConvTwoStreamNormFixBN(
+                3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False, mode=mode
+            )
+            self.bn1_init = norm_layer(self.inplanes, affine=False)
 
+
+        self.bn1_conv = norm_layer(self.inplanes)
         self.layer1 = self._make_layer(block, 16, layers[0])
         self.layer2 = self._make_layer(
             block,
@@ -237,6 +252,7 @@ class ResNetFixedBN(nn.Module):
                 previous_dilation,
                 norm_layer,
                 self.mode,
+                self.gate_width_ratio
             )
         )
         self.inplanes = planes * block.expansion
@@ -250,6 +266,7 @@ class ResNetFixedBN(nn.Module):
                     dilation=self.dilation,
                     norm_layer=norm_layer,
                     mode=self.mode,
+                    gate_width_ratio = self.gate_width_ratio
                 )
             )
 
@@ -468,35 +485,36 @@ if __name__ == "__main__":
     # test defining a model and passing in a tensor
     test_tens = torch.randn(1, 3, 32, 32, device="cuda")
 
-    model = resnet20_fixed().to("cuda")
-    model(test_tens)
-    model = resnet20_sigmoid().to("cuda")
-    model(test_tens)
-    model = resnet32_fixed().to("cuda")
-    model(test_tens)
-    model = resnet32_sigmoid().to("cuda")
-    model(test_tens)
+    # model = resnet20_fixed().to("cuda")
+    # model(test_tens)
+    # model = resnet20_sigmoid().to("cuda")
+    # model(test_tens)
+    # model = resnet32_fixed().to("cuda")
+    # model(test_tens)
+    # model = resnet32_sigmoid().to("cuda")
+    # model(test_tens)
 
-    model = resnet20_fixed(mode=1).to("cuda")
-    model(test_tens)
-    model = resnet32_fixed(mode=1).to("cuda")
-    model(test_tens)
+    # model = resnet20_fixed(mode=1).to("cuda")
+    # model(test_tens)
+    # model = resnet32_fixed(mode=1).to("cuda")
+    # model(test_tens)
 
-    model = resnet20_fixed(mode=2).to("cuda")
-    model(test_tens)
-    model = resnet20_sigmoid(mode=2).to("cuda")
-    model(test_tens)
-    model = resnet32_fixed(mode=2).to("cuda")
-    model(test_tens)
-    model = resnet32_sigmoid(mode=2).to("cuda")
-    model(test_tens)
+    # model = resnet20_fixed(mode=2).to("cuda")
+    # model(test_tens)
+    # model = resnet20_sigmoid(mode=2).to("cuda")
+    # model(test_tens)
+    # model = resnet32_fixed(mode=2).to("cuda")
+    # model(test_tens)
+    # model = resnet32_sigmoid(mode=2).to("cuda")
+    # model(test_tens)
 
-    model = resnet20_fixed(mode=3).to("cuda")
-    model(test_tens)
-    model = resnet32_fixed(mode=3).to("cuda")
-    model(test_tens)
+    # model = resnet20_fixed(mode=3).to("cuda")
+    # model(test_tens)
+    # model = resnet32_fixed(mode=3).to("cuda")
+    # model(test_tens)
 
-    model = resnet20_fixed(mode=4).to("cuda")
+    model = resnet20_fixed(mode=4, gate_width_ratio=10).to("cuda")
     model(test_tens)
-    model = resnet32_fixed(mode=4).to("cuda")
+    print(summary(model))
+    model = resnet32_fixed(mode=4, gate_width_ratio=10).to("cuda")
     model(test_tens)

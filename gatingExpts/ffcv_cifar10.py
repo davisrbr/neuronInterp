@@ -29,13 +29,14 @@ from torch.optim import SGD, lr_scheduler
 from tqdm import tqdm
 
 from torchvision import datasets, transforms, models
-from gating_resnet_cifar_bn_two_streams import resnet20_sigmoid, resnet20_fixed, bn_model_handler
+from gating_resnet_cifar_bn_two_streams import resnet20_sigmoid, resnet20_fixed
 # from gating_resnet_bn_two_streams import resnet20_sigmoid, resnet20_fixed, bn_model_handler
 import wandb
 
 import argparse
 from datetime import datetime
 from uuid import uuid4
+from torchinfo import summary
 
 # import os
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
@@ -51,6 +52,7 @@ if __name__ == "__main__":
     parser.add_argument('--label_smoothing', default=0.0, type=float, help='label smoothing')
     parser.add_argument('--sigmoid', action='store_true')
     parser.add_argument('--batch_size', '-b_sz', default=512, type=int)
+    parser.add_argument('--gate_width_ratio', '-g_wr', default=1, type=int)
     args = parser.parse_args()
 
     datasets = {
@@ -117,8 +119,11 @@ if __name__ == "__main__":
         # model.fc = ch.nn.Linear(512, 10)
         if args.sigmoid:
             model = resnet20_sigmoid(num_classes=10, mode=args.mode)
+        # elif args.gate_width_ratio > 1:
+        #     model = resnet20_fixed(num_classes=10, mode=args.mode, gate_width_ratio=args.gate_width_ratio)
         else:
-            model = resnet20_fixed(num_classes=10, mode=args.mode)
+            model = resnet20_fixed(num_classes=10, mode=args.mode, gate_width_ratio=args.gate_width_ratio)
+            # model = resnet20_fixed(num_classes=10, mode=args.mode)
         model = model.to(memory_format=ch.channels_last).cuda()
 
         EPOCHS = args.epochs
@@ -144,7 +149,7 @@ if __name__ == "__main__":
         entity="single-neuron",
     )
     eventid = datetime.now().strftime('%Y%m_%d%H_%M%S_')
-    wandb.run.name = f"resnet20_cifar10_{'sigmoid' if args.sigmoid else 'fixed'}_m{args.mode}_ffcv_{eventid}"
+    wandb.run.name = f"resnet20_cifar10_{'sigmoid' if args.sigmoid else 'fixed'}_m{args.mode}_wr{args.gate_width_ratio}_{eventid}"
     wandb.config.update(args)
     wandb.watch(model, log='all')
     for ep in range(EPOCHS):
